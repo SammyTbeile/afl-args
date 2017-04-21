@@ -117,7 +117,8 @@ EXP_ST u8  skip_deterministic,        /* Skip deterministic stages?       */
            qemu_mode,                 /* Running in QEMU mode?            */
            skip_requested,            /* Skip request, via SIGUSR1        */
            run_over10m,               /* Run time over 10 minutes?        */
-           persistent_mode;           /* Running in persistent mode?      */
+           persistent_mode,           /* Running in persistent mode?      */
+           fuzz_args;                 /* Fuzz commandline arguments?      */
 
 static s32 out_fd,                    /* Persistent fd for out_file       */
            dev_urandom_fd = -1,       /* Persistent fd for /dev/urandom   */
@@ -217,8 +218,9 @@ static s32 cpu_aff = -1;       	      /* Selected CPU core                */
 
 static FILE* plot_file;               /* Gnuplot output file              */
 
-struct queue_entry {
-
+struct queue_entry{
+  
+  u8** args;                          /* Arguments to put in target argv  */
   u8* fname;                          /* File name for the test case      */
   u32 len;                            /* Input length                     */
 
@@ -7638,7 +7640,7 @@ int main(int argc, char** argv) {
   gettimeofday(&tv, &tz);
   srandom(tv.tv_sec ^ tv.tv_usec ^ getpid());
 
-  while ((opt = getopt(argc, argv, "+i:o:f:m:t:T:dnCB:S:M:x:Q")) > 0)
+  while ((opt = getopt(argc, argv, "+i:o:f:m:t:T:dnCB:S:M:x:Qa:")) > 0)
 
     switch (opt) {
 
@@ -7806,6 +7808,18 @@ int main(int argc, char** argv) {
 
         break;
 
+      case 'a':  { /* fuzz args */
+          u8* arg_string;
+          if (!optarg) FATAL("-a requires an arg string");
+          
+          no_forkserver = 1; /* regardless of AFL_NO_FORKSRV, do not use forkserver */
+          fuzz_args = 1;
+
+          arg_string = optarg;
+          /* TODO parse opts */
+        }
+        break;
+
       default:
 
         usage(argv[0]);
@@ -7907,6 +7921,7 @@ int main(int argc, char** argv) {
     if (stop_soon) goto stop_fuzzing;
   }
 
+  /* main fuzzing loop ... get a queue entry and fuzz it */
   while (1) {
 
     u8 skipped_fuzz;
