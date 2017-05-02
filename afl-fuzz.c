@@ -7525,6 +7525,8 @@ EXP_ST void detect_fuzzed_args(char** argv) {
     i++;  
   }
 
+  if (fuzz_args && target_arg == 0)
+    FATAL("-a flag selected but argv does not contain '%%%%'");
 }
 
 
