@@ -1418,7 +1418,7 @@ static void read_testcases(void) {
   struct dirent **nl;
   s32 nl_cnt;
   u32 i;
-  u8* fn, mem;
+  u8* fn;
 
   /* Auto-detect non-in-place resumption attempts. */
 
