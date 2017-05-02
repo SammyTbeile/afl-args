@@ -19,6 +19,7 @@
    how they affect the execution path.
 
  */
+#define DEBUG_BUILD
 
 #define AFL_MAIN
 #define MESSAGES_TO_STDOUT
@@ -91,8 +92,13 @@ EXP_ST u8 *in_dir,                    /* Input directory with test cases  */
           *target_path,               /* Path to target binary            */
           *orig_cmdline;              /* Original command line            */
 
+static u8** glob_argv;
+
+static u32 target_arg;                /* The index in argv to fuzz        */
+
 EXP_ST u32 exec_tmout = EXEC_TIMEOUT; /* Configurable exec timeout (ms)   */
 EXP_ST u64 mem_limit = MEM_LIMIT;     /* Memory cap for child (MB)        */
+
 
 static u32 stats_update_freq = 1;     /* Stats update frequency (execs)   */
 
@@ -218,11 +224,10 @@ static s32 cpu_aff = -1;       	      /* Selected CPU core                */
 
 static FILE* plot_file;               /* Gnuplot output file              */
 
-struct queue_entry{
-  
-  u8** args;                          /* Arguments to put in target argv  */
+struct queue_entry{  
   u8* fname;                          /* File name for the test case      */
   u32 len;                            /* Input length                     */
+  u8* fuzzed_arg;                     /* The generated argument to test   */
 
   u8  cal_failed,                     /* Calibration failed?              */
       trim_done,                      /* Trimmed?                         */
@@ -801,6 +806,16 @@ static void add_to_queue(u8* fname, u32 len, u8 passed_det) {
 
   last_path_time = get_cur_time();
 
+}
+
+/* Append new test case to the queue when fuzzing arguments.
+    We want to do most of the same stuff in add_to_queue()
+    so call it for simplicity but then fix it up with the 
+    argument-specific stuff */
+static void add_arg_to_queue(u8* fname, u8* new_arg, u8 passed_det) {
+  add_to_queue(fname, strlen(new_arg), passed_det);
+  struct queue_entry* q = queue_top;
+  q->fuzzed_arg = ck_strdup(new_arg);
 }
 
 
@@ -1395,6 +1410,18 @@ static void setup_post(void) {
 }
 
 
+/* Read an entire file containing an argument test case
+  and return a copy of the contents 
+static void* read_arg_file(u8* fname) {
+  u8 buf[1000];
+  u8* result = ck_alloc(sizeof(buf));
+  int fd = open(fname, O_RDONLY);
+  if (fd < 0) PFATAL("Unable to open '%s'", fn);
+  while ()
+
+}*/
+
+
 /* Read all testcases from the input directory, then queue them for testing.
    Called at startup. */
 
@@ -1403,7 +1430,7 @@ static void read_testcases(void) {
   struct dirent **nl;
   s32 nl_cnt;
   u32 i;
-  u8* fn;
+  u8* fn, mem;
 
   /* Auto-detect non-in-place resumption attempts. */
 
@@ -1475,7 +1502,13 @@ static void read_testcases(void) {
     if (!access(dfn, F_OK)) passed_det = 1;
     ck_free(dfn);
 
-    add_to_queue(fn, st.st_size, passed_det);
+    /*if (fuzz_args) {
+
+      mem = read_arg_file(fn);
+      add_arg_to_queue(fn, strlen(mem), passed_det);
+
+    } else
+      */add_to_queue(fn, st.st_size, passed_det);
 
   }
 
@@ -2250,12 +2283,22 @@ EXP_ST void init_forkserver(char** argv) {
 
 }
 
+#ifdef DEBUG_BUILD
+  static void print_call(char* target_path, char** argv) {
+    int i = 0;
+    SAYF("%s", target_path);
+    while (argv[i]) {
+      SAYF(" %s", argv[i]);
+      i++;
+    }
+    SAYF("\n");
+  }
+#endif
 
 /* Execute target application, monitoring for timeouts. Return status
    information. The called program will update trace_bits[]. */
 
 static u8 run_target(char** argv) {
-
   static struct itimerval it;
   static u32 prev_timed_out = 0;
 
@@ -2342,8 +2385,7 @@ static u8 run_target(char** argv) {
       setenv("MSAN_OPTIONS", "exit_code=" STRINGIFY(MSAN_ERROR) ":"
                              "symbolize=0:"
                              "msan_track_origins=0", 0);
-
-      execv(target_path, argv);
+     execv(target_path, argv);
 
       /* Use a distinctive bitmap value to tell the parent about execv()
          falling through. */
@@ -2453,6 +2495,19 @@ static u8 run_target(char** argv) {
 
 }
 
+/*  Copy fuzzed data to argv array in the designated position */ 
+static void replace_arg_testcase(char** argv, u8* mem, u32 len) {
+  
+  if (strcmp(argv[target_arg], "%%") != 0) 
+    ck_free(argv[target_arg]);
+  argv[target_arg] = ck_alloc(len + 1);
+  memcpy(argv[target_arg], mem, len);
+  /* the argument is guaranteed to be null-terminated here.
+      Notably, fuzzing may have introduced nulls earlier in
+      the string, so some of the argument may get cut off
+      by execv(). Oh well? */
+}
+
 
 /* Write modified data to file for testing. If out_file is set, the old file
    is unlinked and a new one is created. Otherwise, out_fd is rewound and
@@ -2460,26 +2515,40 @@ static u8 run_target(char** argv) {
 
 static void write_to_testcase(void* mem, u32 len) {
 
-  s32 fd = out_fd;
+  /*if (fuzz_args) {
+    if (strcmp(glob_argv[target_arg], "%%") != 0) 
+      ck_free(glob_argv[target_arg]);
+    glob_argv[target_arg] = ck_alloc(len + 1);
+    memcpy(glob_argv[target_arg], mem, len);
+     the argument is guaranteed to be null-terminated here.
+      Notably, fuzzing may have introduced nulls earlier in
+      the string, so some of the argument may get cut off
+      by execv(). Oh well? 
+ 
 
-  if (out_file) {
+  } else {*/
+    s32 fd = out_fd;
 
-    unlink(out_file); /* Ignore errors. */
+    if (out_file) {
 
-    fd = open(out_file, O_WRONLY | O_CREAT | O_EXCL, 0600);
+      unlink(out_file); /* Ignore errors. */
 
-    if (fd < 0) PFATAL("Unable to create '%s'", out_file);
+      fd = open(out_file, O_WRONLY | O_CREAT | O_EXCL, 0600);
 
-  } else lseek(fd, 0, SEEK_SET);
+      if (fd < 0) PFATAL("Unable to create '%s'", out_file);
 
-  ck_write(fd, mem, len, out_file);
+    } else lseek(fd, 0, SEEK_SET);
 
-  if (!out_file) {
+    ck_write(fd, mem, len, out_file);
 
-    if (ftruncate(fd, len)) PFATAL("ftruncate() failed");
-    lseek(fd, 0, SEEK_SET);
+    if (!out_file) {
 
-  } else close(fd);
+      if (ftruncate(fd, len)) PFATAL("ftruncate() failed");
+      lseek(fd, 0, SEEK_SET);
+
+    } else close(fd);
+
+  /*}*/
 
 }
 
@@ -2566,6 +2635,7 @@ static u8 calibrate_case(char** argv, struct queue_entry* q, u8* use_mem,
     write_to_testcase(use_mem, q->len);
 
     fault = run_target(argv);
+
 
     /* stop_soon is set by the handler for Ctrl+C. When it's pressed,
        we want to bail out quickly. */
@@ -3135,7 +3205,10 @@ static u8 save_if_interesting(char** argv, void* mem, u32 len, u8 fault) {
 
 #endif /* ^!SIMPLE_FILES */
 
-    add_to_queue(fn, len, 0);
+    if (fuzz_args)
+      add_arg_to_queue(fn, argv[target_arg], 0);
+    else
+      add_to_queue(fn, len, 0);
 
     if (hnb == 2) {
       queue_top->has_new_cov = 1;
@@ -4544,7 +4617,10 @@ EXP_ST u8 common_fuzz_stuff(char** argv, u8* out_buf, u32 len) {
 
   }
 
-  write_to_testcase(out_buf, len);
+  if (fuzz_args)
+    replace_arg_testcase(argv, out_buf, len);
+  else
+    write_to_testcase(out_buf, len);
 
   fault = run_target(argv);
 
@@ -4934,17 +5010,29 @@ static u8 fuzz_one(char** argv) {
 
   /* Map the test case into memory. */
 
-  fd = open(queue_cur->fname, O_RDONLY);
+  /*if (fuzz_args) {
+    
+      We treat args as strings even though they're randomly generated
+        because when passed as an argument to a program, glibc expects
+        them to be null terminated, so using functions that expect 
+        null-terminated strings here works OK too 
+    /*orig_in = in_buf = ck_strdup(queue_cur->fuzzed_arg);
+    len = strlen(queue_cur->fuzzed_arg); // no +1. Avoid fuzzing the terminating null
 
-  if (fd < 0) PFATAL("Unable to open '%s'", queue_cur->fname);
+  } else {*/
+    
+    fd = open(queue_cur->fname, O_RDONLY);
 
-  len = queue_cur->len;
+    if (fd < 0) PFATAL("Unable to open '%s'", queue_cur->fname);
 
-  orig_in = in_buf = mmap(0, len, PROT_READ | PROT_WRITE, MAP_PRIVATE, fd, 0);
+    len = queue_cur->len;
 
-  if (orig_in == MAP_FAILED) PFATAL("Unable to mmap '%s'", queue_cur->fname);
+    orig_in = in_buf = mmap(0, len, PROT_READ | PROT_WRITE, MAP_PRIVATE, fd, 0);
 
-  close(fd);
+    if (orig_in == MAP_FAILED) PFATAL("Unable to mmap '%s'", queue_cur->fname);
+
+    close(fd);    
+  /*}*/
 
   /* We could mmap() out_buf as MAP_PRIVATE, but we end up clobbering every
      single byte anyway, so it wouldn't give us any performance or memory usage
@@ -7473,6 +7561,19 @@ EXP_ST void detect_file_args(char** argv) {
 
 }
 
+EXP_ST void detect_fuzzed_args(char** argv) {
+  u32 i = 0;
+
+  while (argv[i]) {
+    if (strcmp(argv[i], "%%") == 0) {
+      target_arg = i;
+    }
+
+    i++;  
+  }
+
+}
+
 
 /* Set up signal handlers. More complicated that needs to be, because libc on
    Solaris doesn't resume interrupted reads(), sets SA_RESETHAND when you call
@@ -7640,7 +7741,7 @@ int main(int argc, char** argv) {
   gettimeofday(&tv, &tz);
   srandom(tv.tv_sec ^ tv.tv_usec ^ getpid());
 
-  while ((opt = getopt(argc, argv, "+i:o:f:m:t:T:dnCB:S:M:x:Qa:")) > 0)
+  while ((opt = getopt(argc, argv, "+i:o:f:m:t:T:dnCB:S:M:x:Qa")) > 0)
 
     switch (opt) {
 
@@ -7695,7 +7796,7 @@ int main(int argc, char** argv) {
         break;
 
       case 'x': /* dictionary */
-
+        SAYF("BAD!!!!!!!\n")         ;
         if (extras_dir) FATAL("Multiple -x options not supported");
         extras_dir = optarg;
         break;
@@ -7808,22 +7909,13 @@ int main(int argc, char** argv) {
 
         break;
 
-      case 'a':  { /* fuzz args */
-          u8* arg_string;
-          if (!optarg) FATAL("-a requires an arg string");
-          
+      case 'a':   /* fuzz args */ 
           no_forkserver = 1; /* regardless of AFL_NO_FORKSRV, do not use forkserver */
           fuzz_args = 1;
-
-          arg_string = optarg;
-          /* TODO parse opts */
-        }
-        break;
+          break;
 
       default:
-
         usage(argv[0]);
-
     }
 
   if (optind == argc || !in_dir || !out_dir) usage(argv[0]);
@@ -7888,6 +7980,7 @@ int main(int argc, char** argv) {
   if (!timeout_given) find_timeout();
 
   detect_file_args(argv + optind + 1);
+  detect_fuzzed_args(argv + optind);
 
   if (!out_file) setup_stdio_file();
 
@@ -7899,6 +7992,11 @@ int main(int argc, char** argv) {
     use_argv = get_qemu_argv(argv[0], argv + optind, argc - optind);
   else
     use_argv = argv + optind;
+
+  for (int i = 0; i < argc; i++)
+    SAYF("%s ", argv[i]);
+  SAYF("\n");
+  glob_argv = use_argv;
 
   perform_dry_run(use_argv);
 
