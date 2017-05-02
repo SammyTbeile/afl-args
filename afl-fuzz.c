@@ -19,7 +19,7 @@
    how they affect the execution path.
 
  */
-#define DEBUG_BUILD
+//#define DEBUG_BUILD
 
 #define AFL_MAIN
 #define MESSAGES_TO_STDOUT
@@ -227,7 +227,6 @@ static FILE* plot_file;               /* Gnuplot output file              */
 struct queue_entry{  
   u8* fname;                          /* File name for the test case      */
   u32 len;                            /* Input length                     */
-  u8* fuzzed_arg;                     /* The generated argument to test   */
 
   u8  cal_failed,                     /* Calibration failed?              */
       trim_done,                      /* Trimmed?                         */
@@ -807,17 +806,6 @@ static void add_to_queue(u8* fname, u32 len, u8 passed_det) {
   last_path_time = get_cur_time();
 
 }
-
-/* Append new test case to the queue when fuzzing arguments.
-    We want to do most of the same stuff in add_to_queue()
-    so call it for simplicity but then fix it up with the 
-    argument-specific stuff */
-static void add_arg_to_queue(u8* fname, u8* new_arg, u8 passed_det) {
-  add_to_queue(fname, strlen(new_arg), passed_det);
-  struct queue_entry* q = queue_top;
-  q->fuzzed_arg = ck_strdup(new_arg);
-}
-
 
 /* Destroy the entire queue. */
 
@@ -1502,13 +1490,7 @@ static void read_testcases(void) {
     if (!access(dfn, F_OK)) passed_det = 1;
     ck_free(dfn);
 
-    /*if (fuzz_args) {
-
-      mem = read_arg_file(fn);
-      add_arg_to_queue(fn, strlen(mem), passed_det);
-
-    } else
-      */add_to_queue(fn, st.st_size, passed_det);
+    add_to_queue(fn, st.st_size, passed_det);
 
   }
 
@@ -2515,41 +2497,27 @@ static void replace_arg_testcase(char** argv, u8* mem, u32 len) {
 
 static void write_to_testcase(void* mem, u32 len) {
 
-  /*if (fuzz_args) {
-    if (strcmp(glob_argv[target_arg], "%%") != 0) 
-      ck_free(glob_argv[target_arg]);
-    glob_argv[target_arg] = ck_alloc(len + 1);
-    memcpy(glob_argv[target_arg], mem, len);
-     the argument is guaranteed to be null-terminated here.
-      Notably, fuzzing may have introduced nulls earlier in
-      the string, so some of the argument may get cut off
-      by execv(). Oh well? 
- 
+  s32 fd = out_fd;
 
-  } else {*/
-    s32 fd = out_fd;
+  if (out_file) {
 
-    if (out_file) {
+    unlink(out_file); /* Ignore errors. */
 
-      unlink(out_file); /* Ignore errors. */
+    fd = open(out_file, O_WRONLY | O_CREAT | O_EXCL, 0600);
 
-      fd = open(out_file, O_WRONLY | O_CREAT | O_EXCL, 0600);
+    if (fd < 0) PFATAL("Unable to create '%s'", out_file);
 
-      if (fd < 0) PFATAL("Unable to create '%s'", out_file);
+  } else lseek(fd, 0, SEEK_SET);
 
-    } else lseek(fd, 0, SEEK_SET);
+  ck_write(fd, mem, len, out_file);
 
-    ck_write(fd, mem, len, out_file);
+  if (!out_file) {
 
-    if (!out_file) {
+    if (ftruncate(fd, len)) PFATAL("ftruncate() failed");
+    lseek(fd, 0, SEEK_SET);
 
-      if (ftruncate(fd, len)) PFATAL("ftruncate() failed");
-      lseek(fd, 0, SEEK_SET);
-
-    } else close(fd);
-
-  /*}*/
-
+  } else close(fd);
+  
 }
 
 
@@ -3205,10 +3173,7 @@ static u8 save_if_interesting(char** argv, void* mem, u32 len, u8 fault) {
 
 #endif /* ^!SIMPLE_FILES */
 
-    if (fuzz_args)
-      add_arg_to_queue(fn, argv[target_arg], 0);
-    else
-      add_to_queue(fn, len, 0);
+    add_to_queue(fn, len, 0);
 
     if (hnb == 2) {
       queue_top->has_new_cov = 1;
@@ -5010,29 +4975,17 @@ static u8 fuzz_one(char** argv) {
 
   /* Map the test case into memory. */
 
-  /*if (fuzz_args) {
-    
-      We treat args as strings even though they're randomly generated
-        because when passed as an argument to a program, glibc expects
-        them to be null terminated, so using functions that expect 
-        null-terminated strings here works OK too 
-    /*orig_in = in_buf = ck_strdup(queue_cur->fuzzed_arg);
-    len = strlen(queue_cur->fuzzed_arg); // no +1. Avoid fuzzing the terminating null
+  fd = open(queue_cur->fname, O_RDONLY);
 
-  } else {*/
-    
-    fd = open(queue_cur->fname, O_RDONLY);
+  if (fd < 0) PFATAL("Unable to open '%s'", queue_cur->fname);
 
-    if (fd < 0) PFATAL("Unable to open '%s'", queue_cur->fname);
+  len = queue_cur->len;
 
-    len = queue_cur->len;
+  orig_in = in_buf = mmap(0, len, PROT_READ | PROT_WRITE, MAP_PRIVATE, fd, 0);
 
-    orig_in = in_buf = mmap(0, len, PROT_READ | PROT_WRITE, MAP_PRIVATE, fd, 0);
+  if (orig_in == MAP_FAILED) PFATAL("Unable to mmap '%s'", queue_cur->fname);
 
-    if (orig_in == MAP_FAILED) PFATAL("Unable to mmap '%s'", queue_cur->fname);
-
-    close(fd);    
-  /*}*/
+  close(fd);    
 
   /* We could mmap() out_buf as MAP_PRIVATE, but we end up clobbering every
      single byte anyway, so it wouldn't give us any performance or memory usage
@@ -7796,7 +7749,6 @@ int main(int argc, char** argv) {
         break;
 
       case 'x': /* dictionary */
-        SAYF("BAD!!!!!!!\n")         ;
         if (extras_dir) FATAL("Multiple -x options not supported");
         extras_dir = optarg;
         break;
