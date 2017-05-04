@@ -2480,7 +2480,8 @@ static u8 run_target(char** argv) {
 /*  Copy fuzzed data to argv array in the designated position */ 
 static void replace_arg_testcase(char** argv, u8* mem, u32 len) {
   
-  if (strcmp(argv[target_arg], "%%") != 0) 
+  //if (strcmp(argv[target_arg], "%%") != 0) 
+  if (strstr(argv[target_arg], "%%") == NULL) 
     ck_free(argv[target_arg]);
   argv[target_arg] = ck_alloc(len + 1);
   memcpy(argv[target_arg], mem, len);
@@ -7518,9 +7519,12 @@ EXP_ST void detect_fuzzed_args(char** argv) {
   u32 i = 0;
 
   while (argv[i]) {
-    if (strcmp(argv[i], "%%") == 0) {
+  /*  if (strcmp(argv[i], "%%") == 0) {
       target_arg = i;
-    }
+    }*/
+	if (strstr(argv[i], "%%") != NULL){
+		target_arg = i;
+	}
 
     i++;  
   }
@@ -7696,7 +7700,7 @@ int main(int argc, char** argv) {
   gettimeofday(&tv, &tz);
   srandom(tv.tv_sec ^ tv.tv_usec ^ getpid());
 
-  while ((opt = getopt(argc, argv, "+i:o:f:m:t:T:dnCB:S:M:x:Qa")) > 0)
+  while ((opt = getopt(argc, argv, "+i:o:f:m:t:T:dnCB:S:M:x:Q:a")) > 0)
 
     switch (opt) {
 
