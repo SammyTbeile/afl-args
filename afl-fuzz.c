@@ -7934,7 +7934,6 @@ int main(int argc, char** argv) {
   if (!timeout_given) find_timeout();
 
   detect_file_args(argv + optind + 1);
-  detect_fuzzed_args(argv + optind);
 
   if (!out_file) setup_stdio_file();
 
@@ -7946,6 +7945,9 @@ int main(int argc, char** argv) {
     use_argv = get_qemu_argv(argv[0], argv + optind, argc - optind);
   else
     use_argv = argv + optind;
+
+  detect_fuzzed_args(use_argv);
+
 
   for (int i = 0; i < argc; i++)
     SAYF("%s ", argv[i]);
