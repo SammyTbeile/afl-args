@@ -2480,11 +2480,19 @@ static u8 run_target(char** argv) {
 /*  Copy fuzzed data to argv array in the designated position */ 
 static void replace_arg_testcase(char** argv, u8* mem, u32 len) {
   
-  //if (strcmp(argv[target_arg], "%%") != 0) 
-  if (strstr(argv[target_arg], "%%") == NULL) 
-    ck_free(argv[target_arg]);
-  argv[target_arg] = ck_alloc(len + 1);
-  memcpy(argv[target_arg], mem, len);
+  char *fuzz_arg;
+  if ((fuzz_arg = strstr(argv[target_arg], "%%")) == NULL){ 
+	ck_free(argv[target_arg]);
+  	argv[target_arg] = ck_alloc(len + 1);
+  	memcpy(argv[target_arg], mem, len);
+  } else {
+	char *next_arg = ck_alloc(strlen(argv[target_arg])+1 + len +1);
+//	printf("Target_arg: %s\n", argv[target_arg]);
+	strncpy(next_arg,argv[target_arg], strlen(argv[target_arg])-2);
+//	printf("Before cat: %s\n", next_arg);
+	strncat(next_arg,mem, len);
+	argv[target_arg] = next_arg;
+  }
   /* the argument is guaranteed to be null-terminated here.
       Notably, fuzzing may have introduced nulls earlier in
       the string, so some of the argument may get cut off
