@@ -92,8 +92,7 @@ EXP_ST u8 *in_dir,                    /* Input directory with test cases  */
           *target_path,               /* Path to target binary            */
           *orig_cmdline;              /* Original command line            */
 
-static u8** glob_argv;
-
+static char *orig_fuzzed_arg;         /* orig arg containing %%           */
 static u32 target_arg;                /* The index in argv to fuzz        */
 
 EXP_ST u32 exec_tmout = EXEC_TIMEOUT; /* Configurable exec timeout (ms)   */
@@ -2480,19 +2479,23 @@ static u8 run_target(char** argv) {
 /*  Copy fuzzed data to argv array in the designated position */ 
 static void replace_arg_testcase(char** argv, u8* mem, u32 len) {
   
-  char *fuzz_arg;
-  if ((fuzz_arg = strstr(argv[target_arg], "%%")) == NULL){ 
-	ck_free(argv[target_arg]);
-  	argv[target_arg] = ck_alloc(len + 1);
-  	memcpy(argv[target_arg], mem, len);
-  } else {
-	char *next_arg = ck_alloc(strlen(argv[target_arg])+1 + len +1);
-//	printf("Target_arg: %s\n", argv[target_arg]);
-	strncpy(next_arg,argv[target_arg], strlen(argv[target_arg])-2);
-//	printf("Before cat: %s\n", next_arg);
-	strncat(next_arg,mem, len);
-	argv[target_arg] = next_arg;
-  }
+  u8 new_total_len = strlen(orig_fuzzed_arg) - 2 + len;
+  char *next_arg = ck_alloc(new_total_len + 1);
+  char *fuzz_arg = strstr(orig_fuzzed_arg, "%%");
+  
+  int before_pct_len = fuzz_arg - orig_fuzzed_arg;
+  int after_pct_len = strlen(orig_fuzzed_arg) - before_pct_len - 2;
+
+  strncpy(next_arg, orig_fuzzed_arg, before_pct_len);
+  strncpy(next_arg + before_pct_len, mem, len);
+  strncpy(next_arg + before_pct_len + len, orig_fuzzed_arg + before_pct_len + 2, after_pct_len);
+  next_arg[new_total_len] = '\0';
+
+  if ( strcmp(argv[target_arg], orig_fuzzed_arg) != 0 )
+    ck_free(argv[target_arg]);
+  argv[target_arg] = next_arg;
+  //SAYF("%s\n", argv[target_arg]);
+
   /* the argument is guaranteed to be null-terminated here.
       Notably, fuzzing may have introduced nulls earlier in
       the string, so some of the argument may get cut off
@@ -7527,12 +7530,10 @@ EXP_ST void detect_fuzzed_args(char** argv) {
   u32 i = 0;
 
   while (argv[i]) {
-  /*  if (strcmp(argv[i], "%%") == 0) {
-      target_arg = i;
-    }*/
-	if (strstr(argv[i], "%%") != NULL){
-		target_arg = i;
-	}
+  	if (strstr(argv[i], "%%") != NULL){
+      orig_fuzzed_arg = ck_strdup(argv[i]);
+  		target_arg = i;
+  	}
 
     i++;  
   }
@@ -7964,7 +7965,6 @@ int main(int argc, char** argv) {
   for (int i = 0; i < argc; i++)
     SAYF("%s ", argv[i]);
   SAYF("\n");
-  glob_argv = use_argv;
 
   perform_dry_run(use_argv);
 
