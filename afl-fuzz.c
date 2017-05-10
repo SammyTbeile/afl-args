@@ -2479,7 +2479,7 @@ static u8 run_target(char** argv) {
 /*  Copy fuzzed data to argv array in the designated position */ 
 static void replace_arg_testcase(char** argv, u8* mem, u32 len) {
   
-  u8 new_total_len = strlen(orig_fuzzed_arg) - 2 + len;
+  u32 new_total_len = strlen(orig_fuzzed_arg) - 2 + len;
   char *next_arg = ck_alloc(new_total_len + 1);
   char *fuzz_arg = strstr(orig_fuzzed_arg, "%%");
   
@@ -2491,7 +2491,7 @@ static void replace_arg_testcase(char** argv, u8* mem, u32 len) {
   strncpy(next_arg + before_pct_len + len, orig_fuzzed_arg + before_pct_len + 2, after_pct_len);
   next_arg[new_total_len] = '\0';
 
-  if ( strcmp(argv[target_arg], orig_fuzzed_arg) != 0 )
+  if ( strcmp(argv[target_arg], orig_fuzzed_arg) != 0)
     ck_free(argv[target_arg]);
   argv[target_arg] = next_arg;
   //SAYF("%s\n", argv[target_arg]);
