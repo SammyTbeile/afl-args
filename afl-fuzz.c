@@ -3275,7 +3275,7 @@ static u8 save_if_interesting(char** argv, void* mem, u32 len, u8 fault) {
 
       }
 
-      if (!unique_crashes) write_crash_readme();
+      //if (!unique_crashes) write_crash_readme();
 
 #ifndef SIMPLE_FILES
 
